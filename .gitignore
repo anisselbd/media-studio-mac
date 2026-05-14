@@ -1,0 +1,19 @@
+# Node / Vite / dist
+node_modules
+dist
+.DS_Store
+
+# Rust build (Tauri)
+src-tauri/target
+
+# Binaires sidecar — re-téléchargeables via ./setup.sh
+# (trop lourds pour git : ffmpeg ~80 Mo, yt-dlp ~35 Mo)
+src-tauri/binaries/ffmpeg-*
+src-tauri/binaries/yt-dlp-*
+
+# IDE / divers
+.idea
+.vscode
+*.log
+.env
+.env.local

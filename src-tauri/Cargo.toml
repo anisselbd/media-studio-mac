@@ -1,0 +1,39 @@
+[package]
+name = "projet-app-audio"
+version = "0.1.0"
+description = "Extracteur audio depuis vidéo"
+authors = ["anisse"]
+edition = "2021"
+
+# Le binaire principal de l'app desktop.
+[[bin]]
+name = "projet-app-audio"
+path = "src/main.rs"
+
+# Bibliothèque partagée par le binaire (Tauri v2 sépare lib/bin pour permettre
+# le partage de code avec d'autres cibles, ex: mobile plus tard).
+[lib]
+name = "projet_app_audio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+# Plugin officiel qui permet d'exécuter le binaire sidecar (ffmpeg) :
+# fournit l'API `app.shell().sidecar("ffmpeg")` côté Rust.
+tauri-plugin-shell = "2"
+# Plugin officiel pour ouvrir les dialogues natifs (NSOpenPanel sur macOS) :
+# permet à JS d'appeler `open(...)` pour choisir un fichier.
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Profil release : on optimise pour la taille du binaire final (.app).
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
