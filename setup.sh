@@ -54,4 +54,21 @@ fi
 
 echo
 echo "✓ Binaires prêts dans $BINARIES_DIR/"
+
+# === Deno (optionnel mais recommandé pour le téléchargeur YouTube) ===
+# yt-dlp utilise Deno comme runtime JS pour résoudre le n-signature
+# challenge que YouTube applique depuis 2025. Sans Deno, les
+# téléchargements YouTube échouent avec "n challenge solving failed".
+# Les autres plateformes (TikTok, Twitter, Vimeo, Insta) marchent sans.
+if ! command -v deno >/dev/null 2>&1; then
+  echo
+  echo "Note : Deno introuvable."
+  echo "  yt-dlp en a besoin pour résoudre le n-challenge YouTube."
+  echo "  Installe avec :  brew install deno"
+  echo "  (les autres plateformes fonctionnent sans Deno)"
+else
+  echo "Deno présent : $(deno --version | head -1)"
+fi
+
+echo
 echo "  Lance maintenant : npm install && npm run tauri dev"

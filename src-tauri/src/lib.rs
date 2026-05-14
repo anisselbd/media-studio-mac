@@ -1014,6 +1014,15 @@ async fn convert_to_gif(
 
 // ===== Téléchargeur yt-dlp (Vague 3) =====
 
+// Étend le PATH pour que yt-dlp trouve Deno (résolveur du n-signature
+// challenge YouTube). Sans ce fix, une .app lancée par launchd hérite
+// d'un PATH minimal qui ne contient pas /opt/homebrew/bin, donc yt-dlp
+// ne trouve pas Deno et échoue avec "n challenge solving failed".
+fn ytdlp_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    format!("/opt/homebrew/bin:/usr/local/bin:{current}")
+}
+
 // Infos d'une URL telles que renvoyées par `yt-dlp -J`. On ne déserialise
 // que les champs qui nous intéressent (yt-dlp en renvoie des dizaines).
 #[derive(Serialize)]
@@ -1036,6 +1045,7 @@ async fn ytdlp_version(app: tauri::AppHandle) -> Result<String, String> {
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| format!("Binaire yt-dlp introuvable : {e}"))?
+        .env("PATH", ytdlp_path())
         .args(["--version"])
         .output()
         .await
@@ -1050,12 +1060,34 @@ async fn ytdlp_version(app: tauri::AppHandle) -> Result<String, String> {
 // Récupère les métadonnées d'un lien sans télécharger la vidéo.
 // `yt-dlp -J` (ou --dump-json) imprime un objet JSON complet sur stdout.
 #[tauri::command]
-async fn ytdlp_info(app: tauri::AppHandle, url: String) -> Result<YtDlpInfo, String> {
+async fn ytdlp_info(
+    app: tauri::AppHandle,
+    url: String,
+    browser_cookies: Option<String>,
+) -> Result<YtDlpInfo, String> {
+    let mut args: Vec<String> = vec![
+        "-J".into(),
+        "--no-warnings".into(),
+        "--no-playlist".into(),
+        // YouTube bloque souvent le client "web" par défaut. En demandant à
+        // yt-dlp de se présenter en cascade comme iOS/Android/web, on évite
+        // l'erreur "Requested format is not available" qui apparaît quand
+        // le client "web" ne reçoit aucun format servable.
+        "--extractor-args".into(),
+        "youtube:player_client=ios,android,web".into(),
+    ];
+    if let Some(b) = browser_cookies {
+        args.push("--cookies-from-browser".into());
+        args.push(b);
+    }
+    args.push(url);
+
     let output = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| format!("Binaire yt-dlp introuvable : {e}"))?
-        .args(["-J", "--no-warnings", "--no-playlist", &url])
+        .env("PATH", ytdlp_path())
+        .args(args)
         .output()
         .await
         .map_err(|e| format!("Impossible de lancer yt-dlp : {e}"))?;
@@ -1098,11 +1130,26 @@ fn humanize_ytdlp_error(stderr: &str) -> String {
     if lower.contains("video unavailable") || lower.contains("private video") {
         return "Vidéo indisponible (privée, supprimée ou bloquée).".into();
     }
-    if lower.contains("sign in") || lower.contains("login required") {
-        return "Cette vidéo demande une connexion (non supporté).".into();
+    if lower.contains("sign in")
+        || lower.contains("login required")
+        || lower.contains("confirm you're not a bot")
+        || lower.contains("confirm your age")
+    {
+        return "Cette vidéo demande une connexion. Choisis ton navigateur \
+                dans l'option « Cookies du navigateur » ci-dessus pour \
+                t'authentifier automatiquement (tu dois être connecté à \
+                YouTube/TikTok/etc. dans ce navigateur)."
+            .into();
     }
     if lower.contains("http error 403") {
         return "Accès refusé par le serveur (403). Réessaie plus tard.".into();
+    }
+    if lower.contains("requested format is not available") {
+        return "YouTube refuse de servir un format pour cette vidéo. \
+                Choisis ton navigateur dans « Cookies navigateur » \
+                ci-dessus (tu dois être connecté à YouTube dans ce \
+                navigateur). Sinon essaie une résolution inférieure."
+            .into();
     }
     // Sinon on remonte les 3 dernières lignes utiles.
     stderr
@@ -1186,6 +1233,7 @@ async fn ytdlp_download(
     mode: String,
     max_height: Option<u32>,
     audio_format: Option<String>,
+    browser_cookies: Option<String>,
 ) -> Result<DownloadResult, String> {
     let template = format!("{output_dir}/%(title)s.%(ext)s");
 
@@ -1195,20 +1243,39 @@ async fn ytdlp_download(
         "--newline".into(),
         "--concurrent-fragments".into(),
         "4".into(),
+        // Cf. commentaire dans ytdlp_info : on demande à YouTube de se
+        // présenter d'abord en client iOS/Android pour éviter les restrictions
+        // du client "web".
+        "--extractor-args".into(),
+        "youtube:player_client=ios,android,web".into(),
         "-o".into(),
         template,
     ];
+    if let Some(b) = browser_cookies {
+        args.push("--cookies-from-browser".into());
+        args.push(b);
+    }
 
     match mode.as_str() {
         "video" => {
+            // Format selector avec cascade de fallbacks. yt-dlp essaye dans
+            // l'ordre, garde la première chaîne qui matche un format
+            // disponible :
+            //   1. bv*<=H + ba (résolution respectée, flux séparés)
+            //   2. b<=H        (résolution respectée, flux combiné)
+            //   3. bv* + ba    (n'importe quelle résolution, séparés)
+            //   4. b           (n'importe quelle résolution, combiné)
+            // Sans cette cascade, des vidéos sans format vidéo séparé exact
+            // à la résolution demandée renvoient "Requested format is not
+            // available".
             if let Some(h) = max_height {
                 args.push("-f".into());
                 args.push(format!(
-                    "bestvideo[height<={h}]+bestaudio/best[height<={h}]"
+                    "bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b"
                 ));
             } else {
                 args.push("-f".into());
-                args.push("bestvideo+bestaudio/best".into());
+                args.push("bv*+ba/b".into());
             }
             args.push("--merge-output-format".into());
             args.push("mp4".into());
@@ -1233,6 +1300,7 @@ async fn ytdlp_download(
         .shell()
         .sidecar("yt-dlp")
         .map_err(|e| format!("Binaire yt-dlp introuvable : {e}"))?
+        .env("PATH", ytdlp_path())
         .args(args)
         .spawn()
         .map_err(|e| format!("Échec du lancement de yt-dlp : {e}"))?;

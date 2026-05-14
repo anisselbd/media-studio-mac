@@ -54,6 +54,16 @@ npm install
 npm run tauri dev
 ```
 
+### Téléchargeur YouTube (optionnel)
+
+yt-dlp utilise [Deno](https://deno.com) comme runtime JS pour résoudre le n-signature challenge appliqué par YouTube depuis 2025. Sans Deno, les téléchargements YouTube échouent (les autres plateformes fonctionnent sans).
+
+```bash
+brew install deno
+```
+
+De plus, YouTube demande souvent une authentification. La vue Télécharger expose un sélecteur "Cookies navigateur" : choisis le navigateur où tu es connecté à YouTube (Chrome, Firefox, Brave, Edge). Safari requiert l'Accès complet au disque dans Réglages Système.
+
 ## Build release
 
 ```bash

@@ -3814,6 +3814,17 @@ const DOWNLOAD_AUDIO_FORMATS: { value: string; label: string }[] = [
   { value: "m4a", label: "M4A (AAC)" },
 ];
 
+// Navigateurs depuis lesquels yt-dlp peut lire les cookies pour
+// s'authentifier auprès de YouTube/TikTok/etc. "none" = pas de cookies.
+const BROWSER_COOKIES_OPTIONS: { value: string; label: string }[] = [
+  { value: "none", label: "Aucun" },
+  { value: "safari", label: "Safari" },
+  { value: "chrome", label: "Chrome" },
+  { value: "firefox", label: "Firefox" },
+  { value: "brave", label: "Brave" },
+  { value: "edge", label: "Edge" },
+];
+
 export function DownloadView({
   reveal,
   showToast,
@@ -3830,6 +3841,11 @@ export function DownloadView({
   const [audioFormat, setAudioFormat] = useState<string>("mp3");
   const [outputDir, setOutputDir] = useState<string | null>(
     () => localStorage.getItem("downloadDir") || null,
+  );
+  // Navigateur source des cookies pour l'auth yt-dlp. Persisté pour ne
+  // pas avoir à re-sélectionner à chaque session.
+  const [browserCookies, setBrowserCookies] = useState<string>(
+    () => localStorage.getItem("downloadBrowserCookies") || "none",
   );
   // État du binaire yt-dlp : null = pas encore vérifié, string = version
   // détectée, false = absent (on bloque la vue avec un guide d'install).
@@ -3849,6 +3865,9 @@ export function DownloadView({
     if (outputDir) localStorage.setItem("downloadDir", outputDir);
     else localStorage.removeItem("downloadDir");
   }, [outputDir]);
+  useEffect(() => {
+    localStorage.setItem("downloadBrowserCookies", browserCookies);
+  }, [browserCookies]);
 
   const pickOutputDir = async () => {
     const dir = await open({ directory: true, multiple: false });
@@ -3860,7 +3879,10 @@ export function DownloadView({
     if (!trimmed) return;
     setPhase({ kind: "analyzing" });
     try {
-      const info = await invoke<DownloadInfo>("ytdlp_info", { url: trimmed });
+      const info = await invoke<DownloadInfo>("ytdlp_info", {
+        url: trimmed,
+        browserCookies: browserCookies === "none" ? null : browserCookies,
+      });
       setPhase({ kind: "ready", info, url: trimmed });
     } catch (e) {
       setPhase({ kind: "error", message: String(e) });
@@ -3886,6 +3908,7 @@ export function DownloadView({
             ? parseInt(resolution, 10)
             : null,
         audioFormat: mode === "audio" ? audioFormat : null,
+        browserCookies: browserCookies === "none" ? null : browserCookies,
       });
       addHistory({
         kind: "convert",
@@ -3982,6 +4005,18 @@ chmod +x yt-dlp-aarch64-apple-darwin`}</pre>
                 )}
               </button>
             </div>
+            <Segmented
+              label="Cookies navigateur"
+              options={BROWSER_COOKIES_OPTIONS}
+              value={browserCookies}
+              onChange={setBrowserCookies}
+              disabled={phase.kind === "analyzing"}
+            />
+            <p className="page__empty-hint" style={{ marginTop: "-8px" }}>
+              Si YouTube/TikTok refuse de te laisser télécharger ("connexion requise"),
+              choisis le navigateur où tu es connecté à ces sites. yt-dlp utilisera
+              tes cookies pour s'authentifier.
+            </p>
             {phase.kind === "analyzing" && (
               <div className="dl-analyzing">
                 <div className="dl-analyzing__thumb shimmer" aria-hidden />
